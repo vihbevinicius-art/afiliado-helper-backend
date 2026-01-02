@@ -14,12 +14,29 @@ export default async function handler(req, res) {
     }
 
     if (store === "ml") {
-      const id = await getMlId(url);
-      if (!id) {
-        return res.status(400).json({
-          error: "Não achei o ID do Mercado Livre",
-          hint: "Tenta com ?debug=1 pra validar a URL recebida"
-        });
+  const finalUrl = await resolveFinalUrl(url);
+  const html = await fetchText(finalUrl);
+
+  const title =
+    pickMeta(html, "og:title") ||
+    pickTitle(html) ||
+    null;
+
+  const image =
+    pickMeta(html, "og:image") ||
+    null;
+
+  const price = pickPrice(html);
+
+  return res.json({
+    store: "mercado_livre",
+    title,
+    image,
+    price,
+    currency: "BRL",
+    coupon: null,
+    source: "html"
+  });
       }
 if (store === "ml") {
   const id = await getMlId(url);
@@ -136,3 +153,42 @@ async function fetchJson(u) {
   if (!r.ok) throw new Error(`Falha na API do ML: HTTP ${r.status}`);
   return await r.json();
 }
+function pickMeta(html, property) {
+  const re = new RegExp(`<meta[^>]+property=["']${property}["'][^>]+content=["']([^"']+)["']`, "i");
+  const m = html.match(re);
+  return m ? decodeHtml(m[1]).trim() : null;
+}
+
+function pickTitle(html) {
+  const m = html.match(/<title[^>]*>([^<]+)<\/title>/i);
+  return m ? decodeHtml(m[1]).replace(/\s+-\s+Mercado Livre.*$/i, "").trim() : null;
+}
+
+function decodeHtml(s) {
+  return String(s)
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">");
+}
+
+function pickPrice(html) {
+  const metaPrice =
+    pickMeta(html, "product:price:amount") ||
+    pickMeta(html, "og:price:amount");
+
+  if (metaPrice) {
+    const n = Number(String(metaPrice).replace(".", "").replace(",", "."));
+    return Number.isFinite(n) ? n : metaPrice;
+  }
+
+  const m = html.match(/R\$\s*([\d\.]+,\d{2})/);
+  if (m) {
+    const n = Number(m[1].replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : m[1];
+  }
+
+  return null;
+}
+
