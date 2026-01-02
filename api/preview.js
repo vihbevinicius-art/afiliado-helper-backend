@@ -50,7 +50,7 @@ if (store === "amazon") {
     pickMeta(html, "twitter:data1") ||
     null;
 
-  const price = priceMeta ? parsePrice(priceMeta) : null;
+  const price = pickPrice(html);
 
   return res.json({
     store: "amazon",
