@@ -1,56 +1,56 @@
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
 
-  const { url } = req.query;
-
-  if (!url) {
-    return res.status(400).json({ error: "Faltou a URL" });
-  }
-
   try {
+    const url = req.query?.url;
+    if (!url) return res.status(400).json({ error: "Faltou a URL" });
+
     const store = detectStore(url);
+
+    // DEBUG: pra ver exatamente o que ele recebeu
+    // (se você quiser depois a gente remove)
+    if (req.query?.debug === "1") {
+      return res.status(200).json({ ok: true, receivedUrl: url, store });
+    }
 
     if (store === "ml") {
       const id = await getMlId(url);
-if (!id) {
-  return res.status(400).json({ error: "Não achei o ID do Mercado Livre (nem na URL, nem na página)" });
-}
-
-const r = await fetch(`https://api.mercadolibre.com/items/${id}`);
-
+      if (!id) {
+        return res.status(400).json({
+          error: "Não achei o ID do Mercado Livre",
+          hint: "Tenta com ?debug=1 pra validar a URL recebida"
+        });
       }
 
-      const r = await fetch(`https://api.mercadolibre.com/items/${id}`);
-      const item = await r.json();
+      const item = await fetchJson(`https://api.mercadolibre.com/items/${id}`);
 
       return res.json({
         store: "mercado_livre",
-        title: item.title,
-        image: item.pictures?.[0]?.url || item.thumbnail,
-        price: item.price,
-        currency: item.currency_id,
-        coupon: null
+        title: item.title || null,
+        image: item?.pictures?.[0]?.url || item.thumbnail || null,
+        price: item.price ?? null,
+        currency: item.currency_id || "BRL",
+        coupon: null,
+        mlb: id
       });
     }
 
     if (store === "amazon") {
-      return res.json({
-        store: "amazon",
-        error: "Amazon ainda não ligado"
-      });
+      return res.json({ store: "amazon", error: "Amazon ainda não ligado" });
     }
 
     if (store === "ali") {
-      return res.json({
-        store: "aliexpress",
-        error: "AliExpress ainda não ligado"
-      });
+      return res.json({ store: "aliexpress", error: "AliExpress ainda não ligado" });
     }
 
-    return res.status(400).json({ error: "Loja não reconhecida" });
-
+    return res.status(400).json({ error: "Loja não reconhecida", store });
   } catch (e) {
-    return res.status(500).json({ error: "Erro ao buscar produto" });
+    // ERRO REAL AQUI
+    return res.status(500).json({
+      error: "Crash no backend",
+      message: e?.message || String(e),
+      stack: (e?.stack || "").split("\n").slice(0, 6) // só um pedacinho
+    });
   }
 }
 
@@ -65,28 +65,52 @@ function detectStore(link) {
 }
 
 function extractMlIdFromText(text) {
-  // tenta achar MLB123456789 em qualquer texto
-  const m = text.match(/MLB-?\d{6,}/i);
+  const m = String(text).match(/MLB-?\d{6,}/i);
   return m ? m[0].replace("-", "").toUpperCase() : null;
 }
 
 async function getMlId(productUrl) {
-  // 1) tenta na própria URL
+  // 1) tenta na URL
   const fromUrl = extractMlIdFromText(productUrl);
   if (fromUrl) return fromUrl;
 
-  // 2) tenta dentro do HTML da página do produto
-  try {
-    const r = await fetch(productUrl, {
-      headers: { "User-Agent": "Mozilla/5.0" }
-    });
-    const html = await r.text();
+  // 2) tenta seguir redirecionamento pra URL final
+  const finalUrl = await resolveFinalUrl(productUrl);
 
-    // procura um MLB dentro da página
-    const fromHtml = extractMlIdFromText(html);
-    if (fromHtml) return fromHtml;
-  } catch (e) {}
+  const fromFinalUrl = extractMlIdFromText(finalUrl);
+  if (fromFinalUrl) return fromFinalUrl;
+
+  // 3) tenta no HTML da página
+  const html = await fetchText(finalUrl);
+  const fromHtml = extractMlIdFromText(html);
+  if (fromHtml) return fromHtml;
 
   return null;
 }
 
+async function resolveFinalUrl(originalUrl) {
+  try {
+    const r = await fetch(originalUrl, {
+      redirect: "follow",
+      headers: { "User-Agent": "Mozilla/5.0" }
+    });
+    return r.url || originalUrl;
+  } catch {
+    return originalUrl;
+  }
+}
+
+async function fetchText(u) {
+  const r = await fetch(u, {
+    redirect: "follow",
+    headers: { "User-Agent": "Mozilla/5.0", "Accept-Language": "pt-BR,pt;q=0.9" }
+  });
+  if (!r.ok) throw new Error(`Falha ao abrir página do ML: HTTP ${r.status}`);
+  return await r.text();
+}
+
+async function fetchJson(u) {
+  const r = await fetch(u, { headers: { "User-Agent": "Mozilla/5.0" } });
+  if (!r.ok) throw new Error(`Falha na API do ML: HTTP ${r.status}`);
+  return await r.json();
+}
