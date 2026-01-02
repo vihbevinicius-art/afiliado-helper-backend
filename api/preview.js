@@ -169,6 +169,32 @@ async function resolveFinalUrl(originalUrl) {
   try {
     const r = await fetch(originalUrl, {
       redirect: "follow",
+      headers: {
+        "User-Agent": "Mozilla/5.0",
+        "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      },
+    });
+
+    // 1) Se o fetch já resolveu (r.url mudou), perfeito
+    if (r.url && r.url !== originalUrl) return r.url;
+
+    // 2) Se ainda tá no s.click do Ali, tenta extrair link real do HTML
+    const host = new URL(originalUrl).hostname;
+    if (host.includes("s.click.aliexpress.com")) {
+      const html = await r.text();
+      const real = extractAliRealUrl(html);
+      if (real) return real;
+    }
+
+    return r.url || originalUrl;
+  } catch {
+    return originalUrl;
+  }
+ {
+  try {
+    const r = await fetch(originalUrl, {
+      redirect: "follow",
       headers: { "User-Agent": ua() },
     });
     return r.url || originalUrl;
@@ -336,5 +362,16 @@ function pickJsonLdProduct(html) {
   } catch (e) {}
   return null;
 }
+  function extractAliRealUrl(html) {
+  // tenta achar um URL real de produto dentro do HTML do redirecionador
+  // pega o primeiro https://... que pareça aliexpress item
+  const m =
+    html.match(/https?:\/\/(?:www\.)?aliexpress\.com\/item\/[^\s"'<>]+/i) ||
+    html.match(/https?:\/\/(?:www\.)?aliexpress\.com\/i\/[^\s"'<>]+/i) ||
+    html.match(/https?:\/\/(?:www\.)?aliexpress\.com\/[^\s"'<>]+item[^\s"'<>]+/i);
+
+  return m ? m[0] : null;
+}
+
 
 
