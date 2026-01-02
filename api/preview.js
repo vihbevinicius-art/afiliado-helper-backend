@@ -29,10 +29,38 @@ export default async function handler(req, res) {
         source: "html"
       });
     }
+// ======================
+// AMAZON (HTML)
+// ======================
+if (store === "amazon") {
+  const finalUrl = await resolveFinalUrl(url);
+  const html = await fetchText(finalUrl);
 
-    if (store === "amazon") {
-      return res.json({ store: "amazon", error: "Amazon ainda não ligado" });
-    }
+  const title =
+    pickMeta(html, "og:title") ||
+    (html.match(/<span id="productTitle".*?>(.*?)<\/span>/s)?.[1]
+      ?.replace(/\s+/g, " ")
+      ?.trim()) ||
+    "Produto Amazon";
+
+  const image =
+    pickMeta(html, "og:image") ||
+    html.match(/"large":"(https:\/\/[^"]+)"/)?.[1]?.replace(/\\u0026/g, "&") ||
+    null;
+
+  const price = pickPrice(html);
+
+  return res.json({
+    store: "amazon",
+    title,
+    image,
+    price,
+    currency: "BRL",
+    coupon: null,
+    source: "html",
+  });
+}
+
 
     if (store === "ali") {
       return res.json({ store: "aliexpress", error: "AliExpress ainda não ligado" });
