@@ -22,12 +22,15 @@ export default async function handler(req, res) {
     const finalUrl = await resolveFinalUrl(url);
     const html = await fetchText(finalUrl);
 
+    // =========================
+    // MERCADO LIVRE
+    // =========================
     if (store === "ml") {
       const title = pickMeta(html, "og:title") || pickTitle(html) || null;
       const image = pickMeta(html, "og:image") || null;
       const price = pickPrice(html);
 
-      return res.json({
+      return res.status(200).json({
         store: "mercado_livre",
         title,
         image,
@@ -38,104 +41,87 @@ export default async function handler(req, res) {
       });
     }
 
+    // =========================
+    // AMAZON
+    // =========================
     if (store === "amazon") {
-  const finalUrl = await resolveFinalUrl(url);
+      let htmlAmazon = html;
 
-  let html;
-  try {
-    html = await fetchText(finalUrl);
-  } catch (err) {
-    // Amazon costuma bloquear com 403/503/robot check
-    return res.status(200).json({
-      store: "amazon",
-      title: null,
-      image: null,
-      price: null,
-      currency: "BRL",
-      coupon: null,
-      source: "html",
-      error: `Amazon bloqueou a leitura (${err?.message || "erro"})`,
-      hint: "Tenta colar o link do produto no formato /dp/ASIN (ou outro link/afiliado).",
-    });
-  }
+      // (opcional) se quiser forçar pegar HTML de novo pelo finalUrl:
+      // htmlAmazon = await fetchText(finalUrl);
 
-  // title
-  const title =
-    pickMeta(html, "og:title") ||
-    pickMetaName(html, "title") ||
-    pickTitle(html) ||
-    null;
+      const title =
+        pickMeta(htmlAmazon, "og:title") ||
+        pickMetaByName(htmlAmazon, "title") ||
+        pickTitle(htmlAmazon) ||
+        null;
 
-  // image
-  const image =
-    pickMeta(html, "og:image") ||
-    pickMetaName(html, "twitter:image") ||
-    null;
+      const image =
+        pickMeta(htmlAmazon, "og:image") ||
+        pickMetaByName(htmlAmazon, "twitter:image") ||
+        null;
 
-  // price (tentativas)
-  const price =
-    pickAmazonPrice(html) ??
-    pickPrice(html); // fallback genérico (R$ 123,45)
+      const price = pickAmazonPrice(htmlAmazon) ?? pickPrice(htmlAmazon);
 
-  return res.status(200).json({
-    store: "amazon",
-    title,
-    image,
-    price,
-    currency: "BRL",
-    coupon: null,
-    source: "html",
-  });
-}
+      return res.status(200).json({
+        store: "amazon",
+        title,
+        image,
+        price,
+        currency: "BRL",
+        coupon: null,
+        source: "html",
+      });
+    }
 
-
+    // =========================
+    // ALIEXPRESS
+    // =========================
     if (store === "ali") {
-  const finalUrl = await resolveFinalUrl(url);
-  const html = await fetchText(finalUrl);
+      const title =
+        pickMeta(html, "og:title") ||
+        pickMeta(html, "twitter:title") ||
+        pickTitle(html) ||
+        null;
 
-  // 1) tenta via OG/meta (muitas páginas do Ali têm)
-  const title =
-    pickMeta(html, "og:title") ||
-    pickMeta(html, "twitter:title") ||
-    pickTitle(html) ||
-    null;
+      const image =
+        pickMeta(html, "og:image") ||
+        pickMeta(html, "twitter:image") ||
+        pickMetaByName(html, "twitter:image") ||
+        null;
 
-  const image =
-    pickMeta(html, "og:image") ||
-    pickMeta(html, "twitter:image") ||
-    null;
+      // preço via meta
+      const metaPrice =
+        pickMeta(html, "product:price:amount") ||
+        pickMeta(html, "og:price:amount") ||
+        pickMetaByName(html, "twitter:data1") ||
+        null;
 
-  // 2) preço: tenta metas comuns, senão JSON-LD, senão fallback R$
-  const metaPrice =
-    pickMeta(html, "product:price:amount") ||
-    pickMeta(html, "og:price:amount") ||
-    pickMeta(html, "twitter:data1") ||
-    null;
+      // preço via JSON-LD (fallback)
+      const ld = pickJsonLdProduct(html);
 
-  let price = null;
-  if (metaPrice) {
-    const n = Number(String(metaPrice).replace(/\./g, "").replace(",", "."));
-    price = Number.isFinite(n) ? n : metaPrice;
-  } else {
-    const ld = pickJsonLdProduct(html);
-    if (ld?.price != null) price = ld.price;
-  }
+      let price = null;
+      if (metaPrice) {
+        const n = Number(String(metaPrice).replace(/\./g, "").replace(",", "."));
+        price = Number.isFinite(n) ? n : metaPrice;
+      } else if (ld?.price != null) {
+        price = ld.price;
+      } else {
+        price = pickPrice(html);
+      }
 
-  // se vier imagem/price melhor do JSON-LD, usa
-  const ld2 = pickJsonLdProduct(html);
-  const finalImage = image || ld2?.image || null;
+      const finalImage = image || ld?.image || null;
 
-  return res.json({
-    store: "aliexpress",
-    title: title || ld2?.title || null,
-    image: finalImage,
-    price,
-    currency: ld2?.currency || "BRL",
-    coupon: null,
-    source: "html",
-  });
-}
-
+      return res.status(200).json({
+        store: "aliexpress",
+        title: title || ld?.title || null,
+        image: finalImage,
+        price,
+        currency: ld?.currency || "BRL",
+        coupon: null,
+        source: "html",
+      });
+    }
 
     return res.status(400).json({ error: "Loja não reconhecida", store });
   } catch (e) {
@@ -147,6 +133,9 @@ export default async function handler(req, res) {
   }
 }
 
+// =========================
+// DETECT STORE
+// =========================
 function detectStore(link) {
   try {
     const h = new URL(link).hostname.toLowerCase();
@@ -158,21 +147,24 @@ function detectStore(link) {
     if (h.includes("amazon.")) return "amazon";
     if (h === "amzn.to" || h.endsWith(".amzn.to")) return "amazon";
 
-    // AliExpress
+    // AliExpress (inclui s.click)
     if (h.includes("aliexpress")) return "ali";
+    if (h.includes("s.click.aliexpress.com")) return "ali";
   } catch {}
   return "unknown";
 }
 
-
+// =========================
+// RESOLVE FINAL URL
+// =========================
 async function resolveFinalUrl(originalUrl) {
   try {
     const r = await fetch(originalUrl, {
       redirect: "follow",
       headers: {
-        "User-Agent": "Mozilla/5.0",
+        "User-Agent": ua(),
         "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
-        "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
       },
     });
 
@@ -191,18 +183,11 @@ async function resolveFinalUrl(originalUrl) {
   } catch {
     return originalUrl;
   }
- {
-  try {
-    const r = await fetch(originalUrl, {
-      redirect: "follow",
-      headers: { "User-Agent": ua() },
-    });
-    return r.url || originalUrl;
-  } catch {
-    return originalUrl;
-  }
 }
 
+// =========================
+// FETCH HTML
+// =========================
 async function fetchText(url) {
   const r = await fetch(url, {
     redirect: "follow",
@@ -217,7 +202,6 @@ async function fetchText(url) {
   const text = await r.text();
 
   if (r.status >= 400) {
-    // devolve status real pra você entender o que rolou
     throw new Error(`Falha ao buscar HTML: HTTP ${r.status}`);
   }
 
@@ -228,10 +212,13 @@ function ua() {
   return "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36";
 }
 
+// =========================
+// PARSERS
+// =========================
 function pickMeta(html, property) {
   // <meta property="og:title" content="...">
   const re = new RegExp(
-    `<meta[^>]+property=["']${escapeReg(property)}["'][^>]+content=["']([^"']+)["']`,
+    `<meta[^>]+property=["']${escapeRegExp(property)}["'][^>]+content=["']([^"']+)["']`,
     "i"
   );
   const m = html.match(re);
@@ -241,7 +228,7 @@ function pickMeta(html, property) {
 function pickMetaByName(html, name) {
   // <meta name="twitter:image" content="...">
   const re = new RegExp(
-    `<meta[^>]+name=["']${escapeReg(name)}["'][^>]+content=["']([^"']+)["']`,
+    `<meta[^>]+name=["']${escapeRegExp(name)}["'][^>]+content=["']([^"']+)["']`,
     "i"
   );
   const m = html.match(re);
@@ -275,29 +262,6 @@ function pickPrice(html) {
   return null;
 }
 
-function decodeHtml(s) {
-  return String(s)
-    .replace(/&amp;/g, "&")
-    .replace(/&quot;/g, '"')
-    .replace(/&#39;/g, "'")
-    .replace(/&lt;/g, "<")
-    .replace(/&gt;/g, ">")
-    .replace(/&nbsp;/g, " ");
-}
-
-function escapeReg(s) {
-  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function pickMetaName(html, name) {
-  const re = new RegExp(
-    `<meta[^>]+name=["']${escapeRegExp(name)}["'][^>]+content=["']([^"']+)["']`,
-    "i"
-  );
-  const m = html.match(re);
-  return m ? decodeHtml(m[1]).trim() : null;
-}
-
 function pickAmazonPrice(html) {
   const meta =
     pickMeta(html, "product:price:amount") ||
@@ -317,17 +281,42 @@ function pickAmazonPrice(html) {
   return null;
 }
 
+function decodeHtml(s) {
+  return String(s)
+    .replace(/&amp;/g, "&")
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&lt;/g, "<")
+    .replace(/&gt;/g, ">")
+    .replace(/&nbsp;/g, " ");
+}
+
 function escapeRegExp(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+// =========================
+// JSON-LD (ALI / GERAL)
+// =========================
 function pickJsonLdProduct(html) {
   try {
-    const scripts = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+    const scripts = [
+      ...html.matchAll(
+        /<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi
+      ),
+    ];
+
     for (const s of scripts) {
-      const raw = s[1].trim();
+      const raw = s[1]?.trim();
       if (!raw) continue;
 
-      const json = JSON.parse(raw);
+      let json;
+      try {
+        json = JSON.parse(raw);
+      } catch {
+        continue;
+      }
+
       const nodes = Array.isArray(json) ? json : [json];
 
       for (const node of nodes) {
@@ -335,6 +324,7 @@ function pickJsonLdProduct(html) {
 
         for (const item of graph) {
           if (!item) continue;
+
           const type = String(item["@type"] || "").toLowerCase();
           if (!type.includes("product")) continue;
 
@@ -345,25 +335,32 @@ function pickJsonLdProduct(html) {
           if (Array.isArray(item.image)) image = item.image[0] || null;
 
           let price = null;
+          let currency = null;
+
           const offers = item.offers;
           if (offers) {
             const offer = Array.isArray(offers) ? offers[0] : offers;
-            price = offer?.price || offer?.lowPrice || offer?.highPrice || null;
-            if (price != null) {
-              const n = Number(String(price).replace(/\./g, "").replace(",", "."));
-              price = Number.isFinite(n) ? n : price;
+            const rawPrice = offer?.price ?? offer?.lowPrice ?? offer?.highPrice ?? null;
+            currency = offer?.priceCurrency || null;
+
+            if (rawPrice != null) {
+              const n = Number(String(rawPrice).replace(/\./g, "").replace(",", "."));
+              price = Number.isFinite(n) ? n : rawPrice;
             }
           }
 
-          return { title, image, price };
+          return { title, image, price, currency };
         }
       }
     }
-  } catch (e) {}
+  } catch {}
   return null;
 }
-  function extractAliRealUrl(html) {
-  // tenta achar um URL real de produto dentro do HTML do redirecionador
+
+// =========================
+// ALI shortlink extractor
+// =========================
+function extractAliRealUrl(html) {
   // pega o primeiro https://... que pareça aliexpress item
   const m =
     html.match(/https?:\/\/(?:www\.)?aliexpress\.com\/item\/[^\s"'<>]+/i) ||
@@ -372,6 +369,3 @@ function pickJsonLdProduct(html) {
 
   return m ? m[0] : null;
 }
-
-
-
