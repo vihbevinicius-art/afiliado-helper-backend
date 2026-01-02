@@ -90,11 +90,52 @@ export default async function handler(req, res) {
 
 
     if (store === "ali") {
-      return res.json({
-        store: "aliexpress",
-        error: "AliExpress ainda não ligado",
-      });
-    }
+  const finalUrl = await resolveFinalUrl(url);
+  const html = await fetchText(finalUrl);
+
+  // 1) tenta via OG/meta (muitas páginas do Ali têm)
+  const title =
+    pickMeta(html, "og:title") ||
+    pickMeta(html, "twitter:title") ||
+    pickTitle(html) ||
+    null;
+
+  const image =
+    pickMeta(html, "og:image") ||
+    pickMeta(html, "twitter:image") ||
+    null;
+
+  // 2) preço: tenta metas comuns, senão JSON-LD, senão fallback R$
+  const metaPrice =
+    pickMeta(html, "product:price:amount") ||
+    pickMeta(html, "og:price:amount") ||
+    pickMeta(html, "twitter:data1") ||
+    null;
+
+  let price = null;
+  if (metaPrice) {
+    const n = Number(String(metaPrice).replace(/\./g, "").replace(",", "."));
+    price = Number.isFinite(n) ? n : metaPrice;
+  } else {
+    const ld = pickJsonLdProduct(html);
+    if (ld?.price != null) price = ld.price;
+  }
+
+  // se vier imagem/price melhor do JSON-LD, usa
+  const ld2 = pickJsonLdProduct(html);
+  const finalImage = image || ld2?.image || null;
+
+  return res.json({
+    store: "aliexpress",
+    title: title || ld2?.title || null,
+    image: finalImage,
+    price,
+    currency: ld2?.currency || "BRL",
+    coupon: null,
+    source: "html",
+  });
+}
+
 
     return res.status(400).json({ error: "Loja não reconhecida", store });
   } catch (e) {
