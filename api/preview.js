@@ -21,8 +21,28 @@ export default async function handler(req, res) {
           hint: "Tenta com ?debug=1 pra validar a URL recebida"
         });
       }
+if (store === "ml") {
+  const id = await getMlId(url);
+  if (!id) {
+    return res.status(400).json({
+      error: "Não achei o ID do Mercado Livre",
+      hint: "Tenta com ?debug=1 pra validar a URL recebida"
+    });
+  }
 
-      async function fetchJson(u) {
+  const item = await fetchJson(`https://api.mercadolibre.com/items/${id}`);
+
+  return res.json({
+    store: "mercado_livre",
+    title: item.title || null,
+    image: item?.pictures?.[0]?.url || item.thumbnail || null,
+    price: item.price ?? null,
+    currency: item.currency_id || "BRL",
+    coupon: null,
+    mlb: id
+  });
+}
+ async function fetchJson(u) {
   const r = await fetch(u, {
     headers: {
       "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
