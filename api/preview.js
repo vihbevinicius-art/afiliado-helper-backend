@@ -39,47 +39,55 @@ export default async function handler(req, res) {
     }
 
     if (store === "amazon") {
-      // Amazon é chata: pode retornar "Robot Check" / bloqueio
-      const title =
-        pickMeta(html, "og:title") ||
-        pickTitle(html) ||
-        pickMetaByName(html, "title") ||
-        null;
+  const finalUrl = await resolveFinalUrl(url);
 
-      const image =
-        pickMeta(html, "og:image") ||
-        pickMetaByName(html, "twitter:image") ||
-        null;
+  let html;
+  try {
+    html = await fetchText(finalUrl);
+  } catch (err) {
+    // Amazon costuma bloquear com 403/503/robot check
+    return res.status(200).json({
+      store: "amazon",
+      title: null,
+      image: null,
+      price: null,
+      currency: "BRL",
+      coupon: null,
+      source: "html",
+      error: `Amazon bloqueou a leitura (${err?.message || "erro"})`,
+      hint: "Tenta colar o link do produto no formato /dp/ASIN (ou outro link/afiliado).",
+    });
+  }
 
-      const price = pickPrice(html);
+  // title
+  const title =
+    pickMeta(html, "og:title") ||
+    pickMetaName(html, "title") ||
+    pickTitle(html) ||
+    null;
 
-      // Se tiver cara de bloqueio, já devolve um erro amigável
-      const isBlocked =
-        /robot check|captcha|automated access|sorry/i.test(html);
+  // image
+  const image =
+    pickMeta(html, "og:image") ||
+    pickMetaName(html, "twitter:image") ||
+    null;
 
-      if (isBlocked) {
-        return res.status(200).json({
-          store: "amazon",
-          error: "Amazon bloqueou o robô (captcha/robot check).",
-          title,
-          image,
-          price,
-          currency: "BRL",
-          coupon: null,
-          source: "html",
-        });
-      }
+  // price (tentativas)
+  const price =
+    pickAmazonPrice(html) ??
+    pickPrice(html); // fallback genérico (R$ 123,45)
 
-      return res.json({
-        store: "amazon",
-        title,
-        image,
-        price,
-        currency: "BRL",
-        coupon: null,
-        source: "html",
-      });
-    }
+  return res.status(200).json({
+    store: "amazon",
+    title,
+    image,
+    price,
+    currency: "BRL",
+    coupon: null,
+    source: "html",
+  });
+}
+
 
     if (store === "ali") {
       return res.json({
@@ -100,20 +108,21 @@ export default async function handler(req, res) {
 
 function detectStore(link) {
   try {
-    const u = new URL(link);
-    const h = u.hostname.toLowerCase();
+    const h = new URL(link).hostname.toLowerCase();
 
-    // ML
-    if (h.includes("mercadolivre") || h.includes("ml.com")) return "ml";
+    // Mercado Livre
+    if (h.includes("mercadolivre") || h.includes("mercadolibre")) return "ml";
 
-    // Amazon (inclui amzn.to)
-    if (h.includes("amazon") || h.includes("amzn.to")) return "amazon";
+    // Amazon (inclui shortlink)
+    if (h.includes("amazon.")) return "amazon";
+    if (h === "amzn.to" || h.endsWith(".amzn.to")) return "amazon";
 
-    // Ali
-    if (h.includes("aliexpress") || h.includes("ali")) return "ali";
+    // AliExpress
+    if (h.includes("aliexpress")) return "ali";
   } catch {}
   return "unknown";
 }
+
 
 async function resolveFinalUrl(originalUrl) {
   try {
@@ -212,4 +221,37 @@ function decodeHtml(s) {
 function escapeReg(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+
+function pickMetaName(html, name) {
+  const re = new RegExp(
+    `<meta[^>]+name=["']${escapeRegExp(name)}["'][^>]+content=["']([^"']+)["']`,
+    "i"
+  );
+  const m = html.match(re);
+  return m ? decodeHtml(m[1]).trim() : null;
+}
+
+function pickAmazonPrice(html) {
+  const meta =
+    pickMeta(html, "product:price:amount") ||
+    pickMeta(html, "og:price:amount");
+
+  if (meta) {
+    const n = Number(String(meta).replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  const m = html.match(/R\$\s*([\d\.]+,\d{2})/);
+  if (m) {
+    const n = Number(m[1].replace(/\./g, "").replace(",", "."));
+    return Number.isFinite(n) ? n : null;
+  }
+
+  return null;
+}
+
+function escapeRegExp(s) {
+  return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
 
