@@ -11,9 +11,13 @@ export default async function handler(req, res) {
     const store = detectStore(url);
 
     if (store === "ml") {
-      const id = extractMlId(url);
-      if (!id) {
-        return res.status(400).json({ error: "Não achei o ID do Mercado Livre" });
+      const id = await getMlId(url);
+if (!id) {
+  return res.status(400).json({ error: "Não achei o ID do Mercado Livre (nem na URL, nem na página)" });
+}
+
+const r = await fetch(`https://api.mercadolibre.com/items/${id}`);
+
       }
 
       const r = await fetch(`https://api.mercadolibre.com/items/${id}`);
@@ -60,7 +64,29 @@ function detectStore(link) {
   return "unknown";
 }
 
-function extractMlId(link) {
-  const m = link.match(/(MLB-?\d{6,})/i);
-  return m ? m[1].replace("-", "").toUpperCase() : null;
+function extractMlIdFromText(text) {
+  // tenta achar MLB123456789 em qualquer texto
+  const m = text.match(/MLB-?\d{6,}/i);
+  return m ? m[0].replace("-", "").toUpperCase() : null;
 }
+
+async function getMlId(productUrl) {
+  // 1) tenta na própria URL
+  const fromUrl = extractMlIdFromText(productUrl);
+  if (fromUrl) return fromUrl;
+
+  // 2) tenta dentro do HTML da página do produto
+  try {
+    const r = await fetch(productUrl, {
+      headers: { "User-Agent": "Mozilla/5.0" }
+    });
+    const html = await r.text();
+
+    // procura um MLB dentro da página
+    const fromHtml = extractMlIdFromText(html);
+    if (fromHtml) return fromHtml;
+  } catch (e) {}
+
+  return null;
+}
+
