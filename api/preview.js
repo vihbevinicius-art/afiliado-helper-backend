@@ -29,26 +29,28 @@ export default async function handler(req, res) {
         source: "html"
       });
     }
-// ======================
-// AMAZON (HTML)
-// ======================
 if (store === "amazon") {
   const finalUrl = await resolveFinalUrl(url);
   const html = await fetchText(finalUrl);
 
   const title =
     pickMeta(html, "og:title") ||
-    (html.match(/<span id="productTitle".*?>(.*?)<\/span>/s)?.[1]
-      ?.replace(/\s+/g, " ")
-      ?.trim()) ||
-    "Produto Amazon";
+    pickMeta(html, "title") ||
+    pickTitle(html) ||
+    null;
 
   const image =
     pickMeta(html, "og:image") ||
-    html.match(/"large":"(https:\/\/[^"]+)"/)?.[1]?.replace(/\\u0026/g, "&") ||
+    pickMeta(html, "twitter:image") ||
     null;
 
-  const price = pickPrice(html);
+  const priceMeta =
+    pickMeta(html, "product:price:amount") ||
+    pickMeta(html, "og:price:amount") ||
+    pickMeta(html, "twitter:data1") ||
+    null;
+
+  const price = priceMeta ? parsePrice(priceMeta) : null;
 
   return res.json({
     store: "amazon",
@@ -59,6 +61,8 @@ if (store === "amazon") {
     coupon: null,
     source: "html",
   });
+}
+
 }
 
 
@@ -98,13 +102,28 @@ async function resolveFinalUrl(originalUrl) {
   }
 }
 
-async function fetchText(u) {
-  const r = await fetch(u, {
+async function fetchText(url) {
+  const r = await fetch(url, {
     redirect: "follow",
     headers: {
-      "User-Agent": "Mozilla/5.0",
-      "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
-      "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8"
+      "User-Agent":
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36",
+      "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+      Accept:
+        "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+    },
+  });
+
+  const text = await r.text();
+
+  // Se a Amazon bloquear, você vai ver "Robot Check", "captcha", etc.
+  if (r.status >= 400) {
+    throw new Error(`Falha ao buscar HTML: HTTP ${r.status}`);
+  }
+
+  return text;
+}
+
     }
   });
   if (!r.ok) throw new Error(`Falha ao abrir página: HTTP ${r.status}`);
