@@ -22,17 +22,19 @@ export default async function handler(req, res) {
         });
       }
 
-      const item = await fetchJson(`https://api.mercadolibre.com/items/${id}`);
+      async function fetchJson(u) {
+  const r = await fetch(u, {
+    headers: {
+      "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      "Accept": "application/json,text/plain,*/*",
+      "Accept-Language": "pt-BR,pt;q=0.9,en;q=0.8",
+      "Referer": "https://www.mercadolivre.com.br/"
+    }
+  });
+  if (!r.ok) throw new Error(`Falha na API do ML: HTTP ${r.status}`);
+  return await r.json();
+}
 
-      return res.json({
-        store: "mercado_livre",
-        title: item.title || null,
-        image: item?.pictures?.[0]?.url || item.thumbnail || null,
-        price: item.price ?? null,
-        currency: item.currency_id || "BRL",
-        coupon: null,
-        mlb: id
-      });
     }
 
     if (store === "amazon") {
