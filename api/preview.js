@@ -294,5 +294,47 @@ function pickAmazonPrice(html) {
 function escapeRegExp(s) {
   return String(s).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
+function pickJsonLdProduct(html) {
+  try {
+    const scripts = [...html.matchAll(/<script[^>]*type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi)];
+    for (const s of scripts) {
+      const raw = s[1].trim();
+      if (!raw) continue;
+
+      const json = JSON.parse(raw);
+      const nodes = Array.isArray(json) ? json : [json];
+
+      for (const node of nodes) {
+        const graph = node["@graph"] ? node["@graph"] : [node];
+
+        for (const item of graph) {
+          if (!item) continue;
+          const type = String(item["@type"] || "").toLowerCase();
+          if (!type.includes("product")) continue;
+
+          const title = item.name || null;
+
+          let image = null;
+          if (typeof item.image === "string") image = item.image;
+          if (Array.isArray(item.image)) image = item.image[0] || null;
+
+          let price = null;
+          const offers = item.offers;
+          if (offers) {
+            const offer = Array.isArray(offers) ? offers[0] : offers;
+            price = offer?.price || offer?.lowPrice || offer?.highPrice || null;
+            if (price != null) {
+              const n = Number(String(price).replace(/\./g, "").replace(",", "."));
+              price = Number.isFinite(n) ? n : price;
+            }
+          }
+
+          return { title, image, price };
+        }
+      }
+    }
+  } catch (e) {}
+  return null;
+}
 
 
